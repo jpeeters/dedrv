@@ -3,7 +3,7 @@ use std::fmt::Display;
 use proc_macro2::TokenStream;
 
 use quote::{quote, ToTokens};
-use syn::{FnArg, ItemTrait, TraitItem, TraitItemFn};
+use syn::{FnArg, ItemTrait, Pat, TraitItem, TraitItemFn};
 
 pub type Result<T, E = Error> = ::core::result::Result<T, E>;
 
@@ -153,8 +153,8 @@ fn class_tag_quote(t: &ItemTrait) -> TokenStream {
     let visibility = t.vis.clone();
 
     quote! {
-        #visibility mod tag {
-            struct #ident;
+        pub mod tag {
+            #visibility struct #ident;
         }
     }
 }
@@ -195,7 +195,37 @@ fn class_accessor_impl_method_quote(m: &TraitItemFn) -> Result<TokenStream> {
     let ident = m.sig.ident.clone();
     let out = m.sig.output.clone();
 
+    // These are input arguments, which a simple copy from the trait.
     let args = m.sig.inputs.clone();
+
+    // Then, these inputs are converted to a list of identifier to pass through the driver
+    // implementation.
+    let argv: Vec<_> = m
+        .sig
+        .inputs
+        .iter()
+        // First, skip the function receiver.
+        .skip(1)
+        // Then, map each input argument to its identifier.
+        .map(|x| {
+            if let FnArg::Typed(t) = x {
+                if let Pat::Ident(x) = &*t.pat {
+                    return x.ident.clone();
+                }
+            }
+            // Because we skipped the first receiver argument, others must be typed ones.
+            unreachable!()
+        })
+        .collect();
+
+    // Replace the receiver argument with the driver internal state, which is behind a
+    // `Mutex<RefCell<D::StateType>>`. So, thanks to internior mutability of the `RefCell`, we can
+    // pass the argument as an immutable reference.
+    let argv = if argv.is_empty() {
+        quote!(&self.inner().state)
+    } else {
+        quote!(&self.inner().state, #(#argv),*)
+    };
 
     let params = m.sig.generics.params.clone();
     let r#where = m.sig.generics.where_clause.clone();
@@ -208,10 +238,12 @@ fn class_accessor_impl_method_quote(m: &TraitItemFn) -> Result<TokenStream> {
 
     Ok(quote! {
         fn #ident #generics (#args) #out #r#where {
-            D:: #ident (#args) #out #r#where
+            // Call the driver implementation of the device class trait.
+            D:: #ident (#argv)
         }
     })
 }
+
 fn validate_trait(t: &ItemTrait) -> Result<()> {
     if !t.generics.params.is_empty() {
         return Err(Error::InvalidClassGenerics);

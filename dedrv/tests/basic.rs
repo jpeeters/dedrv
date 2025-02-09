@@ -1,38 +1,10 @@
 use dedrv::{Accessor, Device, Driver};
 
 /// Defines a peripheral class.
+#[dedrv::class]
 pub trait Gpio {
     fn get_value(&self) -> u32;
     fn set_value(&mut self, value: u32);
-}
-
-// Generated.
-mod driver {
-    use dedrv::StateLock;
-
-    use super::*;
-
-    pub trait Gpio: Driver {
-        // TODO: use device instead of state.
-        fn get_value(state: &StateLock<Self>) -> u32;
-        fn set_value(state: &StateLock<Self>, value: u32);
-    }
-}
-
-// Generated.
-mod tag {
-    pub struct Gpio;
-}
-
-// Generated.
-impl<D: driver::Gpio> Gpio for Accessor<'_, D, tag::Gpio> {
-    fn get_value(&self) -> u32 {
-        D::get_value(&self.inner().state)
-    }
-
-    fn set_value(&mut self, value: u32) {
-        D::set_value(&self.inner().state, value)
-    }
 }
 
 #[cfg(test)]
