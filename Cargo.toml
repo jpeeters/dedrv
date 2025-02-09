@@ -1,0 +1,36 @@
+[workspace.package]
+authors = ["Julien Peeters <julien@mountainhacks.org>"]
+description = "A minimal library for implementing device drivers on resource-constrained targets"
+
+homepage = "https://github.com/jpeeters/dedrv"
+repository = "https://github.com/jpeeters/dedrv"
+
+license = "Apache-2.0 or MIT"
+readme = "README.md"
+
+edition = "2021"
+version = "0.1.0"
+
+[workspace]
+resolver = "2"
+
+members = [
+  "dedrv",
+  "dedrv-macros",
+]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+strip = true
+
+[profile.dev]
+codegen-units = 1
+
+[workspace.dependencies]
+anyhow = "1.0.95"
+critical-section = "1.2.0"
+googletest = "0.13.0"
+thiserror = { version = "2.0.11", default-features = false }
+trybuild = "1.0.103"
