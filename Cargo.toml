@@ -14,10 +14,7 @@ version = "0.1.0"
 [workspace]
 resolver = "2"
 
-members = [
-  "dedrv",
-  "dedrv-macros",
-]
+members = ["dedrv", "dedrv-macros"]
 
 [profile.release]
 codegen-units = 1

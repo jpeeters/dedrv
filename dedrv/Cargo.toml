@@ -1,0 +1,23 @@
+[package]
+name = "dedrv"
+authors.workspace = true
+description.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+publish = true
+
+[dependencies]
+critical-section = { workspace = true }
+thiserror = { workspace = true }
+
+dedrv-macros = { path = "../dedrv-macros", version = "=0.1.0" }
+
+[dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }
+googletest = { workspace = true }
+trybuild = { workspace = true }
