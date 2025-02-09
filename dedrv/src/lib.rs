@@ -171,3 +171,44 @@ impl<'d, D: Driver, Tag> Accessor<'d, D, Tag> {
         self.inner().state_ref_mut(cs)
     }
 }
+
+/// Device descriptor to be put inside linker section.
+#[repr(C)]
+pub struct Descriptor {
+    pub path: &'static str,
+    pub init: fn(*const ()),
+    pub udata: *const (),
+}
+
+impl Descriptor {
+    pub const fn new<D: Driver>(
+        path: &'static str,
+        device: &'static Device<D>,
+        init: fn(*const ()),
+    ) -> Self {
+        Descriptor {
+            path,
+            init,
+            udata: core::ptr::addr_of!(*device) as *const _,
+        }
+    }
+}
+
+unsafe impl Sync for Descriptor {}
+
+unsafe extern "C" {
+    static __DEDRV_MARKER_DEVICE_START: usize;
+    static __DEDRV_MARKER_DEVICE_END: usize;
+}
+
+/// Initialize device drivers.
+pub fn init() {
+    let mut cursor = core::ptr::addr_of!(__DEDRV_MARKER_DEVICE_START) as *const Descriptor;
+    let end = core::ptr::addr_of!(__DEDRV_MARKER_DEVICE_END) as *const Descriptor;
+
+    while cursor < end {
+        let desc = unsafe { &*cursor };
+        (desc.init)(desc.udata);
+        cursor = cursor.wrapping_add(1);
+    }
+}

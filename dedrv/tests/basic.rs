@@ -11,7 +11,7 @@ pub trait Gpio {
 mod tests {
     use googletest::prelude::*;
 
-    use dedrv::StateLock;
+    use dedrv::{Descriptor, StateLock};
 
     use super::*;
 
@@ -62,5 +62,19 @@ mod tests {
 
         gpio.set_value(32);
         critical_section::with(|cs| assert_that!(*gpio.inner_state_ref(cs), eq(32)));
+    }
+
+    #[test]
+    fn it_should_populate_dedrv_linker_section() {
+        static DEVICE: Device<GpioDriver> = Device::new();
+
+        fn __dedrv_device_init(ptr: *const ()) {
+            let device: &'static _ = unsafe { &*(ptr as *const Device<GpioDriver>) };
+            device.init();
+        }
+
+        #[allow(unused)]
+        #[link_section = ".dedrv.device.gpio0"]
+        static DESCRIPTOR: Descriptor = Descriptor::new("/gpio0", &DEVICE, __dedrv_device_init);
     }
 }
