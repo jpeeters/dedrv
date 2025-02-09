@@ -3,7 +3,7 @@ use std::fmt::Display;
 use proc_macro2::TokenStream;
 
 use quote::{quote, ToTokens};
-use syn::{FnArg, ImplItemFn, ItemTrait, TraitItem, TraitItemFn};
+use syn::{FnArg, ItemTrait, TraitItem, TraitItemFn};
 
 pub type Result<T, E = Error> = ::core::result::Result<T, E>;
 
@@ -18,6 +18,9 @@ pub enum Error {
 
     #[error("class method must have a self receiver")]
     MissingReceiver,
+
+    #[error("class method must not be async")]
+    AsyncNotSupported,
 
     #[default]
     #[error("undefined error")]
@@ -57,10 +60,19 @@ pub fn run(args: TokenStream, item: TokenStream) -> TokenStream {
     let impls = class_accessor_impl_quote(&t);
 
     quote! {
+        // The original device class trait.
         #item
+
+        // The device driver class trait.
         #driver
+
+        // The tag associated with the device class.
         #tag
+
+        // The device accessor implementation for device class trait.
         #impls
+
+        // The errors returned by the present macro.
         #errors
     }
 }
@@ -92,15 +104,18 @@ fn class_driver_quote(t: &ItemTrait) -> Result<TokenStream> {
         .collect();
 
     Ok(quote! {
-        mod driver {
-            use ::dedrv::{Device, Driver};
+        // The driver module for isolating the device class trait from the driver point of view.
+        // Then apply the same visibility as for the original device class trait.
+        #visibility mod driver {
+            use ::dedrv::{Device, Driver, StateLock};
             use super::*;
 
-            #visibility trait #ident : Driver {
+            pub trait #ident : Driver {
                 #(#fns)*
             }
         }
 
+        // The errors returned by the present macro.
         #errors
     })
 }
@@ -111,25 +126,14 @@ fn class_driver_method_quote(m: &TraitItemFn) -> Result<TokenStream> {
     let ident = m.sig.ident.clone();
     let out = m.sig.output.clone();
 
-    let mutable = if let Some(arg) = m.sig.inputs.first() {
-        match arg {
-            FnArg::Receiver(r) => r.mutability.is_some(),
-            _ => false,
-        }
-    } else {
-        return Err(Error::MissingReceiver);
-    };
-
     let args: Vec<_> = m.sig.inputs.iter().skip(1).collect();
-    let mutability = if mutable { quote!(mut) } else { quote!() };
 
     let args = if args.is_empty() {
-        quote!(dev: & #mutability Self::StateType)
+        quote!(state: &StateLock<Self>)
     } else {
-        quote!(dev: & #mutability Self::StateType, #(#args),*)
+        quote!(state: &StateLock<Self>, #(#args),*)
     };
 
-    let r#async = m.sig.asyncness;
     let params = m.sig.generics.params.clone();
     let r#where = m.sig.generics.where_clause.clone();
 
@@ -140,23 +144,43 @@ fn class_driver_method_quote(m: &TraitItemFn) -> Result<TokenStream> {
     };
 
     Ok(quote! {
-        #r#async fn #ident #generics (#args) #out #r#where;
+        fn #ident #generics (#args) #out #r#where;
     })
 }
 
 fn class_tag_quote(t: &ItemTrait) -> TokenStream {
     let ident = t.ident.clone();
+    let visibility = t.vis.clone();
 
     quote! {
-        mod tag {
+        #visibility mod tag {
             struct #ident;
         }
     }
 }
 
 fn class_accessor_impl_quote(t: &ItemTrait) -> TokenStream {
+    let mut errors = TokenStream::new();
+
+    let fns = t.items.iter().fold(Vec::new(), |mut acc, x| {
+        if let TraitItem::Fn(f) = x {
+            acc.push(f);
+        }
+        acc
+    });
+
     let ident = t.ident.clone();
-    let fns: Vec<ImplItemFn> = Vec::new();
+
+    let fns: Vec<_> = fns
+        .iter()
+        .map(|&f| match class_accessor_impl_method_quote(f) {
+            Ok(m) => m,
+            Err(e) => {
+                error(&mut errors, f, e);
+                quote!()
+            }
+        })
+        .collect();
 
     quote! {
         impl<D: driver:: #ident> #ident for Accessor<'_, D, tag:: #ident> {
@@ -165,6 +189,29 @@ fn class_accessor_impl_quote(t: &ItemTrait) -> TokenStream {
     }
 }
 
+fn class_accessor_impl_method_quote(m: &TraitItemFn) -> Result<TokenStream> {
+    validate_method(m)?;
+
+    let ident = m.sig.ident.clone();
+    let out = m.sig.output.clone();
+
+    let args = m.sig.inputs.clone();
+
+    let params = m.sig.generics.params.clone();
+    let r#where = m.sig.generics.where_clause.clone();
+
+    let generics = if params.is_empty() {
+        quote!()
+    } else {
+        quote!(< #params >)
+    };
+
+    Ok(quote! {
+        fn #ident #generics (#args) #out #r#where {
+            D:: #ident (#args) #out #r#where
+        }
+    })
+}
 fn validate_trait(t: &ItemTrait) -> Result<()> {
     if !t.generics.params.is_empty() {
         return Err(Error::InvalidClassGenerics);
@@ -185,6 +232,10 @@ fn validate_method(m: &TraitItemFn) -> Result<()> {
 
     if !matches!(arg, FnArg::Receiver(_)) {
         return Err(Error::MissingReceiver);
+    }
+
+    if m.sig.asyncness.is_some() {
+        return Err(Error::AsyncNotSupported);
     }
 
     Ok(())
@@ -211,7 +262,15 @@ mod tests {
 
         verify_that!(result, not(contains_substring("error")))?;
         verify_that!(result, contains_substring(quote!(mod driver).to_string()))?;
-        verify_that!(result, contains_substring(quote!(SomeClass<D>).to_string()))?;
+        verify_that!(
+            result,
+            contains_substring(
+                quote!(
+                    trait SomeClass {}
+                )
+                .to_string()
+            )
+        )?;
 
         Ok(())
     }
@@ -234,7 +293,7 @@ mod tests {
         verify_that!(result, not(contains_substring("error")))?;
         verify_that!(
             result,
-            contains_substring(quote!(fn a_method(dev: &Device<D>)).to_string())
+            contains_substring(quote!(fn a_method(state: &StateLock<Self>)).to_string())
         )?;
 
         Ok(())
@@ -258,7 +317,7 @@ mod tests {
         verify_that!(result, not(contains_substring("error")))?;
         verify_that!(
             result,
-            contains_substring(quote!(fn a_method(dev: &Device<D>, arg: u32)).to_string())
+            contains_substring(quote!(fn a_method(state: &StateLock<Self>, arg: u32)).to_string())
         )?;
 
         Ok(())
@@ -282,7 +341,7 @@ mod tests {
         verify_that!(result, not(contains_substring("error")))?;
         verify_that!(
             result,
-            contains_substring(quote!(fn a_method(dev: &Device<D>) -> u32).to_string())
+            contains_substring(quote!(fn a_method(state: &StateLock<Self>) -> u32).to_string())
         )?;
 
         Ok(())
@@ -306,31 +365,7 @@ mod tests {
         verify_that!(result, not(contains_substring("error")))?;
         verify_that!(
             result,
-            contains_substring(quote!(fn a_method(dev: &mut Device<D>)).to_string())
-        )?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn it_should_compile_method_with_async_and_no_arg() -> googletest::Result<()> {
-        let code = run(
-            quote!(),
-            quote! {
-                trait SomeClass {
-                    async fn a_method(&self);
-                }
-            },
-        );
-
-        assert_that!(code.is_empty(), eq(false));
-
-        let result = code.to_string();
-
-        verify_that!(result, not(contains_substring("error")))?;
-        verify_that!(
-            result,
-            contains_substring(quote!(async fn a_method(dev: &Device<D>)).to_string())
+            contains_substring(quote!(fn a_method(state: &StateLock<Self>)).to_string())
         )?;
 
         Ok(())
@@ -354,7 +389,7 @@ mod tests {
         verify_that!(result, not(contains_substring("error")))?;
         verify_that!(
             result,
-            contains_substring(quote!(fn a_method<T>(dev: &Device<D>)).to_string())
+            contains_substring(quote!(fn a_method<T>(state: &StateLock<Self>)).to_string())
         )?;
 
         Ok(())
@@ -378,7 +413,7 @@ mod tests {
         verify_that!(result, not(contains_substring("error")))?;
         verify_that!(
             result,
-            contains_substring(quote!(fn a_method<T1, T2>(dev: &Device<D>)).to_string())
+            contains_substring(quote!(fn a_method<T1, T2>(state: &StateLock<Self>)).to_string())
         )?;
 
         Ok(())
@@ -403,7 +438,7 @@ mod tests {
         verify_that!(
             result,
             contains_substring(
-                quote!(fn a_method<T>(dev: &Device<D>) where T: Default).to_string()
+                quote!(fn a_method<T>(state: &StateLock<Self>) where T: Default).to_string()
             )
         )?;
 
