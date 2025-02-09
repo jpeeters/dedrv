@@ -4,6 +4,3 @@
 
 # rust
 target/
-
-# flake
-flake.lock
