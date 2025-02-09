@@ -9,6 +9,40 @@ As a result, one can develop device drivers for many different targets but with 
 Every device driver is also managed during its initialization and clean-up phase, offering
 customization on these phases (e.g. ordering, priority, hook...).
 
+## For developers
+
+The developing environment is based on Nix developer shells, which offers a all-inclusive
+developer experience, at least we hope so.
+
+So as to start, just type the following.
+
+If you have Nix with flakes:
+
+```shell
+nix develop
+```
+
+If you have `direnv` and Nix with flakes:
+
+```shell
+echo "use flake" >> .envrc
+direnv allow
+```
+
+And if you do not want to type all this, there is a helper as a just rule:
+
+```shell
+just init direnv
+```
+
+Or:
+
+```shell
+nix run nixpkgs#just -- init direnv
+```
+
+if you do not have just installed on you Nix configuration.
+
 ## MSRV
 
 The minimum supported Rust version is 1.76. `dedrv` is tested against the latest stable Rust
