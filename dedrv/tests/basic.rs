@@ -8,7 +8,7 @@ pub trait Gpio {
 
 // Generated.
 mod driver {
-    use embedded_devices::StateLock;
+    use dedrv::StateLock;
 
     use super::*;
 

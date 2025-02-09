@@ -21,3 +21,6 @@ dedrv-macros = { path = "../dedrv-macros", version = "=0.1.0" }
 critical-section = { workspace = true, features = ["std"] }
 googletest = { workspace = true }
 trybuild = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }

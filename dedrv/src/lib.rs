@@ -22,7 +22,7 @@ pub mod error {
 pub use error::{Error, Result};
 
 /// Re-exports macros.
-pub use embedded_devices_macros as macros;
+pub use dedrv_macros::*;
 
 /// Defines the driver interface.
 pub trait Driver {
@@ -43,8 +43,11 @@ pub trait Driver {
 /// `critical-section` crate for protecting access to the driver internal state.
 pub type StateLock<D> = Mutex<RefCell<<D as Driver>::StateType>>;
 
-/// Defines an accessor tag that is not associated to any peripheral class.
-pub struct NoTag;
+/// The tag module, including all tags possble for an accessor.
+pub mod tag {
+    /// Defines an accessor tag that is not associated to any peripheral class.
+    pub struct NoTag;
+}
 
 /// Defines a device from the hardware point of view.
 ///
@@ -122,14 +125,8 @@ impl<D: Driver> Drop for Device<D> {
     fn drop(&mut self) {}
 }
 
-/// Defines a device class that represents a hardware peripheral programming interface.
-pub trait Class<Tag = NoTag> {
-    /// The name of the device class.
-    const NAME: &str = "undefined";
-}
-
 /// Defines an accessor.
-pub struct Accessor<'d, D: Driver + 'static, Tag = NoTag> {
+pub struct Accessor<'d, D: Driver + 'static, Tag = tag::NoTag> {
     pub device: NonNull<Device<D>>,
     _marker: PhantomData<&'d Device<D>>,
     _tag: PhantomData<Tag>,
