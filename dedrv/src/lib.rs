@@ -189,7 +189,7 @@ impl Descriptor {
         Descriptor {
             path,
             init,
-            udata: core::ptr::addr_of!(*device) as *const _,
+            udata: &raw const *device as *const _,
         }
     }
 }
@@ -203,12 +203,15 @@ unsafe extern "C" {
 
 /// Initialize device drivers.
 pub fn init() {
-    let mut cursor = core::ptr::addr_of!(__DEDRV_MARKER_DEVICE_START) as *const Descriptor;
-    let end = core::ptr::addr_of!(__DEDRV_MARKER_DEVICE_END) as *const Descriptor;
+    let mut cursor = &raw const __DEDRV_MARKER_DEVICE_START as *const Descriptor;
+    let end = &raw const __DEDRV_MARKER_DEVICE_END as *const Descriptor;
 
     while cursor < end {
-        let desc = unsafe { &*cursor };
+        // Call driver init function on its internal state stored in the device instance.
+        let desc: &'static Descriptor = unsafe { &*cursor };
         (desc.init)(desc.udata);
+
+        // Go to next descriptor.
         cursor = cursor.wrapping_add(1);
     }
 }
