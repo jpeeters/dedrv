@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use defmt::info;
+use defmt::{debug, info};
 
 use defmt_rtt as _;
 use panic_probe as _;
@@ -13,15 +13,6 @@ use dedrv::{Accessor, Device, Driver};
 pub enum PinMode {
     Input,
     Output,
-}
-
-impl defmt::Format for PinMode {
-    fn format(&self, f: defmt::Formatter) {
-        match self {
-            PinMode::Input => defmt::write!(f, "input"),
-            PinMode::Output => defmt::write!(f, "output"),
-        }
-    }
 }
 
 #[dedrv::class]
@@ -42,8 +33,8 @@ impl Driver for GpioDriver {
 }
 
 impl driver::Gpio for GpioDriver {
-    fn configure(_: &dedrv::StateLock<Self>, pin: u8, mode: PinMode) {
-        info!("configure gpio pin {} in mode {}", pin, mode);
+    fn configure(_: &dedrv::StateLock<Self>, pin: u8, _: PinMode) {
+        debug!("configure gpio pin {}", pin);
     }
 }
 
@@ -59,6 +50,8 @@ fn main() -> ! {
 
     let gpio = GPIO0.accessor::<tag::Gpio>();
     gpio.configure(0 /* pin */, PinMode::Output);
+
+    info!("init ok");
 
     #[allow(clippy::empty_loop)]
     loop {}
