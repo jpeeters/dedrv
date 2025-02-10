@@ -1,9 +1,9 @@
-use std::fmt::Display;
-
 use proc_macro2::TokenStream;
 
-use quote::{quote, ToTokens};
+use quote::quote;
 use syn::{FnArg, ItemTrait, Pat, TraitItem, TraitItemFn};
+
+use crate::helpers::{error, token_stream_with_error};
 
 pub type Result<T, E = Error> = ::core::result::Result<T, E>;
 
@@ -25,15 +25,6 @@ pub enum Error {
     #[default]
     #[error("undefined error")]
     Undefined,
-}
-
-fn token_stream_with_error(mut tokens: TokenStream, err: syn::Error) -> TokenStream {
-    tokens.extend(err.into_compile_error());
-    tokens
-}
-
-fn error<A: ToTokens, T: Display>(tokens: &mut TokenStream, obj: A, msg: T) {
-    tokens.extend(syn::Error::new_spanned(obj.into_token_stream(), msg).into_compile_error())
 }
 
 pub fn run(args: TokenStream, item: TokenStream) -> TokenStream {
