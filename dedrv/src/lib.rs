@@ -1,4 +1,6 @@
-#![no_std]
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
+#![cfg_attr(not(test), no_std)]
 
 use core::cell::{Ref, RefCell, RefMut};
 use core::fmt::Display;
@@ -7,10 +9,12 @@ use core::ptr::NonNull;
 
 use critical_section::{CriticalSection, Mutex};
 
-/// Defines the errors that can be returned.
+/// Defines the errors at the crate level.
 pub mod error {
+    #[doc(hidden)]
     pub type Result<T, E = Error> = ::core::result::Result<T, E>;
 
+    #[doc(hidden)]
     #[derive(Debug, PartialEq, Eq, thiserror::Error)]
     pub enum Error {
         #[error("undefined error")]
@@ -18,52 +22,70 @@ pub mod error {
     }
 }
 
-/// Re-exports.
+// Re-exports of errors.
 pub use error::{Error, Result};
 
-/// Re-exports macros.
+// Re-exports of macros.
 pub use dedrv_macros::*;
 
-/// Defines the driver interface.
+/// The driver interface.
+///
+/// The driver does not include a state but only the implementation. Instead, the driver internal
+/// state is stored by a [`Device`] instance.
 pub trait Driver {
     /// The type of the internal driver state.
-    /// Note: it must be `Sized` because it must be statically constructible.
     type StateType: Send + Sized;
 
     /// The init function of the driver.
-    /// Note: multiple calls to the `init` function must be idempotent.
+    ///
+    /// This function initializes the driver internal state. It may include any side-effect that
+    /// is required by the underlying hardware device to set up.
     fn init(state: &StateLock<Self>);
 
     /// The cleanup function of the driver.
-    /// Note: multiple calls to the `cleanup` function must be idempotent.
+    ///
+    /// This function cleans up the driver internal state. This may include any side-effect that
+    /// is required by the underlying hardware device to go back to a default state.
     fn cleanup(state: &StateLock<Self>);
 }
 
-/// Lock to protect the `RefCell` of the driver state. This offers the driver implementation to use
-/// `critical-section` crate for protecting access to the driver internal state.
+/// Lock-protected driver internal state.
+///
+/// In concrete implementation, the driver internal state must be lock-protected to prevent from
+/// race conditions (e.g. interrupt handler). The driver state being stored in a [`Device`], it
+/// requires inner mutability. Both these constraints lead to use a [`RefCell`] inside a
+/// `Mutex`. This offers the driver implementation to use the `critical-section` crate, which
+/// implements a portable lock-based mechanism.
 pub type StateLock<D> = Mutex<RefCell<<D as Driver>::StateType>>;
 
-/// The tag module, including all tags possble for an accessor.
+/// The device class tags.
+///
+/// Tags are used to statically restrain an [`Accessor`] to a unique device class.
 pub mod tag {
-    /// Defines an accessor tag that is not associated to any peripheral class.
+    /// Defines a dummy (i.e. no-op) tag.
     pub struct NoTag;
 }
 
-/// Defines a device from the hardware point of view.
+/// A device instance.
 ///
-/// It includes the driver state so that a same driver can be used for multiple instances of the
-/// same hardware device (e.g. gpio, adc, timers...).
+/// Stores every device driver internal state and resources that are related to a given device
+/// instance. This offers to share a driver implementation between many device instances but
+/// specialize each
 pub struct Device<D: Driver + 'static> {
-    /// The driver state owned by the device.
+    /// The lock-protected state for the driver that is related to this device instance.
     pub state: StateLock<D>,
 
-    // The driver implementation phantom type. Because the driver is stateless, there is no need
-    // for keeping an instance of it.
+    #[doc(hidden)]
     _drv: PhantomData<&'static D>,
 }
 
 impl<D: Driver> Device<D> {
-    /// Create a new device with the internal driver state set to zereos.
+    /// Create a new device instance.
+    ///
+    /// A device is `const`-constructible, so this function may be called from a top-level site
+    /// (e.g. static global variable).
+    ///
+    /// At creation, the driver state of this device instance is zeroed.
     pub const fn new() -> Self {
         Device {
             state: Mutex::new(RefCell::new(unsafe { core::mem::zeroed() })),
@@ -71,14 +93,14 @@ impl<D: Driver> Device<D> {
         }
     }
 
-    /// Call the `init` function of the driver. This call is idempotent until the next call to
-    /// the `cleanup` function.
+    /// Call the [`Driver::init`] function of the driver on this device instance.
+    #[inline(always)]
     pub fn init(&self) {
         D::init(&self.state)
     }
 
-    /// Call the `cleanup` function of the driver. This call is idempotent until the next call to
-    /// the `init` function.
+    /// Call the [`Driver::cleanup`] function of the driver on this device instance.
+    #[inline(always)]
     pub fn cleanup(&self) {
         D::cleanup(&self.state)
     }
@@ -101,6 +123,10 @@ impl<D: Driver> Device<D> {
         self.state.borrow_ref_mut(cs)
     }
 
+    /// Get a new accessor for the given class from this device.
+    ///
+    /// The type of an [`Accessor`] is tagged with a device class tag. This prevent from obtaining
+    /// an accessor for a class that is not implemented by the underlying driver.
     pub fn accessor<Tag>(&self) -> Accessor<'_, D, Tag> {
         Accessor::new(self)
     }
@@ -125,14 +151,20 @@ impl<D: Driver> Drop for Device<D> {
     fn drop(&mut self) {}
 }
 
-/// Defines an accessor.
+/// An device class accessor.
 pub struct Accessor<'d, D: Driver + 'static, Tag = tag::NoTag> {
+    /// The owning device of this accessor.
     pub device: NonNull<Device<D>>,
+
+    #[doc(hidden)]
     _marker: PhantomData<&'d Device<D>>,
+
+    #[doc(hidden)]
     _tag: PhantomData<Tag>,
 }
 
 impl<'d, D: Driver, Tag> Accessor<'d, D, Tag> {
+    /// Create a new accessor from an owning [`Device`].
     pub fn new(device: &'d Device<D>) -> Self {
         let device = unsafe { NonNull::new_unchecked(device as *const _ as *mut _) };
         Accessor {
@@ -172,15 +204,19 @@ impl<'d, D: Driver, Tag> Accessor<'d, D, Tag> {
     }
 }
 
-/// Device descriptor to be put inside linker section.
+/// Device descriptor to be stored in the `.dedrv.device.*` sections inside the linker script.
 #[repr(C)]
 pub struct Descriptor {
-    pub path: &'static str,
-    pub init: fn(*const ()),
-    pub udata: *const (),
+    path: &'static str,
+    init: fn(*const ()),
+    udata: *const (),
 }
 
 impl Descriptor {
+    /// Create a new device descriptor.
+    ///
+    /// The `path` is a unique and short string identifier for the device. It provides a key to
+    /// look up on the device in the static table (i.e. linker section).
     pub const fn new<D: Driver>(
         path: &'static str,
         device: &'static Device<D>,
@@ -201,17 +237,17 @@ unsafe extern "C" {
     static __DEDRV_MARKER_DEVICE_END: usize;
 }
 
-/// Initialize device drivers.
+/// Initialize all device drivers that are declared using the [`device`] attribute.
 pub fn init() {
     let mut cursor = &raw const __DEDRV_MARKER_DEVICE_START as *const Descriptor;
     let end = &raw const __DEDRV_MARKER_DEVICE_END as *const Descriptor;
 
     while cursor < end {
-        // Call driver init function on its internal state stored in the device instance.
+        // SAFETY: At this point we guarantee that the cursor actually points to a `Descriptor`.
+        // So, dereferencing the cursor is valid.
         let desc: &'static Descriptor = unsafe { &*cursor };
         (desc.init)(desc.udata);
 
-        // Go to next descriptor.
         cursor = cursor.wrapping_add(1);
     }
 }
