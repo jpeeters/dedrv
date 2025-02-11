@@ -8,7 +8,7 @@ use panic_probe as _;
 
 use dedrv::{Accessor, Device, Driver};
 
-#[derive(Debug)]
+#[derive(Debug, defmt::Format)]
 #[non_exhaustive]
 pub enum PinMode {
     Input,
@@ -33,8 +33,8 @@ impl Driver for GpioDriver {
 }
 
 impl driver::Gpio for GpioDriver {
-    fn configure(_: &dedrv::StateLock<Self>, pin: u8, _: PinMode) {
-        debug!("configure gpio pin {}", pin);
+    fn configure(_: &dedrv::StateLock<Self>, pin: u8, mode: PinMode) {
+        debug!("configure gpio pin {} (mode: {})", pin, mode);
     }
 }
 
