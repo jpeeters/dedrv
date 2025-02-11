@@ -1,0 +1,5 @@
+error: unexpected closing delimiter: `}`
+  --> tests/units/accessor_after_drop.rs:14:1
+   |
+14 | }
+   | ^ unexpected closing delimiter

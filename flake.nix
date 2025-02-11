@@ -98,8 +98,11 @@
             cargo-binutils
             cargo-deny
             cargo-nextest
+            flip-link
             just
+            gcc-arm-embedded-13
             minicom
+            probe-rs-tools
           ];
         };
       }
